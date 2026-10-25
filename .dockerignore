@@ -1,0 +1,8 @@
+workspace
+mlruns
+mlflow.db
+model
+data
+__pycache__
+.venv
+.git

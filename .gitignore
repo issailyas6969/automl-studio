@@ -1,0 +1,7 @@
+.venv
+workspace
+mlruns
+mlflow.db
+model
+__pycache__
+*.zip

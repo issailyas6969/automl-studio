@@ -1,0 +1,70 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AutoML Studio</title>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--tx:#14181f;--mut:#667085;--bd:#e3e6eb;--ac:#4f46e5;--ok:#16a34a;--er:#dc2626}
+@media(prefers-color-scheme:dark){:root{--bg:#0e1116;--card:#171b22;--tx:#e8ebf0;--mut:#98a2b3;--bd:#2a303a;--ac:#818cf8;--ok:#4ade80;--er:#f87171}}
+*{box-sizing:border-box}body{margin:0;font:15px/1.5 system-ui,sans-serif;background:var(--bg);color:var(--tx)}
+main{max-width:980px;margin:0 auto;padding:24px 16px 80px}h1{font-size:22px;margin:0}.sub{color:var(--mut);margin:2px 0 20px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:20px;margin-bottom:16px}.card h2{font-size:16px;margin:0 0 12px}
+.drop{border:2px dashed var(--bd);border-radius:12px;padding:34px;text-align:center;color:var(--mut);cursor:pointer}.drop.over{border-color:var(--ac);color:var(--ac)}
+table{border-collapse:collapse;width:100%;font-size:13px}th,td{text-align:left;padding:6px 10px;border-bottom:1px solid var(--bd);white-space:nowrap}.scroll{overflow-x:auto}
+button,select,input{font:inherit;color:inherit}.btn{background:var(--ac);color:#fff;border:0;border-radius:8px;padding:9px 18px;cursor:pointer;font-weight:600}.btn:disabled{opacity:.5}
+select,input[type=text],input[type=number]{background:var(--bg);border:1px solid var(--bd);border-radius:8px;padding:8px 10px;width:100%}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:12px}label.f{display:block;font-size:12px;color:var(--mut)}
+.chips{display:flex;flex-wrap:wrap;gap:8px}.chip{border:1px solid var(--bd);border-radius:20px;padding:5px 12px;cursor:pointer;user-select:none}.chip.on{background:var(--ac);color:#fff;border-color:var(--ac)}
+.bar{height:8px;background:var(--bd);border-radius:4px;overflow:hidden}.bar i{display:block;height:100%;background:var(--ac);transition:width .3s}
+pre{background:var(--bg);border-radius:8px;padding:10px;max-height:140px;overflow:auto;font-size:12px;margin:12px 0 0;white-space:pre-wrap}
+.best td{font-weight:700;color:var(--ok)}.msg{color:var(--er);margin-top:8px}.hide{display:none}
+.pill{display:inline-block;background:var(--bg);border:1px solid var(--bd);border-radius:6px;padding:2px 8px;font-size:12px;margin:0 6px 4px 0}
+a{color:var(--ac)}
+</style></head><body><main>
+<h1>AutoML Studio</h1><p class="sub">Upload a CSV, pick a target, train and compare many models, then predict.</p>
+<section class="card"><h2>1 · Dataset</h2>
+<div class="drop" id="drop">Drop a CSV here or click to browse<input id="file" type="file" accept=".csv,.tsv,.txt" hidden></div>
+<div id="prof" class="hide"></div><div class="msg" id="e1"></div></section>
+<section class="card hide" id="cfg"><h2>2 · Configure</h2>
+<div class="grid"><div><label class="f">Target column</label><select id="target"></select></div>
+<div><label class="f">Search iterations per model: <b id="nv">6</b></label><input id="iters" type="range" min="2" max="20" value="6"></div></div>
+<label class="f" style="margin-top:14px">Models (click to toggle)</label><div class="chips" id="models"></div>
+<p style="margin:16px 0 0"><button class="btn" id="go">Train models</button></p><div class="msg" id="e2"></div></section>
+<section class="card hide" id="run"><h2>3 · Training</h2><div class="bar"><i id="pb" style="width:0"></i></div><pre id="log"></pre><div class="scroll" id="board" style="margin-top:12px"></div></section>
+<section class="card hide" id="pred"><h2>4 · Predict</h2><div id="sum"></div><div class="grid" id="form" style="margin:14px 0"></div>
+<button class="btn" id="pgo">Predict</button><div id="pout" style="margin-top:14px"></div>
+<p style="margin:18px 0 0;color:var(--mut)">Batch: <input id="bfile" type="file" accept=".csv" style="width:auto"> (returns the CSV with a prediction column) · <a id="dl">Download model.joblib</a></p></section>
+</main><script>
+const $=id=>document.getElementById(id);let DS,JOB,META;
+const api=async(u,o)=>{const r=await fetch(u,o);if(!r.ok){let m=r.statusText;try{const d=await r.json();m=typeof d.detail=='string'?d.detail:JSON.stringify(d.detail)}catch{}throw new Error(m)}return r};
+const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const fmt=v=>typeof v=='number'?v.toLocaleString(undefined,{maximumFractionDigits:4}):esc(v);
+const table=(h,rows)=>'<table><tr>'+h.map(c=>`<th>${esc(c)}</th>`).join('')+'</tr>'+rows.map(r=>'<tr>'+r.map(v=>`<td>${esc(v)}</td>`).join('')+'</tr>').join('')+'</table>';
+const post=(u,b)=>api(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});
+async function upload(f){$('e1').textContent='';try{DS=await(await api('/api/upload?name='+encodeURIComponent(f.name),{method:'POST',body:f})).json();
+$('prof').classList.remove('hide');
+$('prof').innerHTML=`<p style="margin:14px 0 6px"><b>${esc(DS.name)}</b> · ${DS.rows.toLocaleString()} rows · ${DS.cols.length} columns</p><div class="scroll">`+table(['Column','Type','Missing','Unique'],DS.cols.map(c=>[c.name,c.dtype,(c.missing*100).toFixed(1)+'%',c.unique]))+'</div><p style="margin:14px 0 6px"><b>Preview</b></p><div class="scroll">'+table(DS.cols.map(c=>c.name),DS.preview.map(r=>DS.cols.map(c=>r[c.name])))+'</div>';
+$('target').innerHTML=DS.cols.map(c=>`<option ${c.name==DS.suggested_target?'selected':''}>${esc(c.name)}</option>`).join('');
+$('models').innerHTML=DS.models.map(m=>`<span class="chip ${m.default?'on':''}" data-k="${m.key}">${esc(m.label)}</span>`).join('');
+$('cfg').classList.remove('hide')}catch(e){$('e1').textContent=e.message}}
+const dr=$('drop');dr.onclick=()=>$('file').click();$('file').onchange=e=>e.target.files[0]&&upload(e.target.files[0]);
+dr.ondragover=e=>{e.preventDefault();dr.classList.add('over')};dr.ondragleave=()=>dr.classList.remove('over');
+dr.ondrop=e=>{e.preventDefault();dr.classList.remove('over');e.dataTransfer.files[0]&&upload(e.dataTransfer.files[0])};
+$('iters').oninput=e=>$('nv').textContent=e.target.value;$('models').onclick=e=>e.target.dataset.k&&e.target.classList.toggle('on');
+$('go').onclick=async()=>{$('e2').textContent='';const models=[...document.querySelectorAll('.chip.on')].map(c=>c.dataset.k);
+try{JOB=(await(await post('/api/train',{id:DS.id,target:$('target').value,models,n_iter:+$('iters').value})).json()).job;
+$('run').classList.remove('hide');$('pred').classList.add('hide');$('board').innerHTML='';$('go').disabled=true;poll()}catch(e){$('e2').textContent=e.message}};
+async function poll(){const j=await(await api('/api/jobs/'+JOB)).json();
+$('pb').style.width=(j.progress*100)+'%';$('log').textContent=j.log.join('\n');$('log').scrollTop=1e9;
+if(j.board.length)$('board').innerHTML=table(['#','Model','CV score','Test metrics','Time'],j.board.map((b,i)=>[i+1,b.label,b.cv,Object.entries(b.metrics).map(([k,v])=>k+' '+v).join(' · '),b.secs+'s'])).replace('<tr><td>1</td>','<tr class="best"><td>1</td>');
+if(j.status=='running')return setTimeout(poll,1000);
+$('go').disabled=false;if(j.status=='error'){$('e2').textContent=j.error;return}META=j.result;showPredict()}
+function showPredict(){$('pred').classList.remove('hide');
+$('sum').innerHTML=`<span class="pill">${META.task}</span><span class="pill">best: ${esc(META.best_model)}</span>`+Object.entries(META.metrics).map(([k,v])=>`<span class="pill">${k} ${v}</span>`).join('')+(META.dropped.length?`<div style="color:var(--mut);font-size:12px">Ignored columns (constant or ID-like): ${META.dropped.map(esc).join(', ')}</div>`:'');
+$('form').innerHTML=Object.entries(META.features).map(([c,t])=>{const num=/int|float/.test(t),ch=META.choices[c],v=META.example[c]??'';
+return `<div><label class="f">${esc(c)}</label>`+(ch?`<select data-c="${esc(c)}">${ch.map(o=>`<option ${o==v?'selected':''}>${esc(o)}</option>`).join('')}</select>`:`<input data-c="${esc(c)}" data-n="${num?1:0}" type="${num?'number':'text'}" step="any" value="${esc(v)}">`)+'</div>'}).join('');
+$('dl').href='/api/download/'+JOB;$('pred').scrollIntoView({behavior:'smooth'})}
+$('pgo').onclick=async()=>{const row={};document.querySelectorAll('#form [data-c]').forEach(e=>{row[e.dataset.c]=e.dataset.n=='1'?(e.value===''?null:+e.value):e.value});
+try{const d=await(await post('/api/predict/'+JOB,{rows:[row]})).json();
+let h=`<div style="font-size:22px;font-weight:700">${esc(META.target)} → ${fmt(d.predictions[0])}</div>`;
+if(d.probabilities)h+=d.classes.map((c,i)=>{const p=d.probabilities[0][i];return `<div style="margin-top:8px;font-size:13px">${esc(c)} · ${(p*100).toFixed(1)}%<div class="bar"><i style="width:${p*100}%"></i></div></div>`}).join('');
+$('pout').innerHTML=h}catch(e){$('pout').innerHTML=`<span class="msg">${esc(e.message)}</span>`}};
+$('bfile').onchange=async e=>{const f=e.target.files[0];if(!f)return;try{const r=await api('/api/predict_csv/'+JOB,{method:'POST',body:f});
+const a=document.createElement('a');a.href=URL.createObjectURL(await r.blob());a.download='predictions.csv';a.click()}catch(x){$('pout').innerHTML=`<span class="msg">${esc(x.message)}</span>`}e.target.value=''};
+</script></body></html>
